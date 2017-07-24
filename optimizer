@@ -2,17 +2,19 @@ import sys
 
 platform = sys.platform
 if sys.platform.startswith('win'):
+    platform = 'win'
     slash = '\\'
 elif sys.platform.startswith('linux'):
+    platform = 'linux'
     slash = '/'
 else:
-    print '\n Can not determine platform. Peace, Out!'
+    print '\nFail. Can not determine platform.'
     sys.exit()
 
 import os,glob,time,shutil,math,random
 from optparse import OptionParser
 
-usage = 'usage: split_image_dev_test <input image; or input folder; or text file with input dir or file, and output dir> <output dir> <job dir> <job number,AOI name> <user name> [options]'
+usage = 'usage: optimizer_dev <input image; or input folder; or text file with input dir or file, and output dir> <output dir> <job dir> <job number,AOI name> <user name> [options]'
 
 parser = OptionParser(usage=usage)
 
@@ -31,8 +33,8 @@ parser.add_option("--rz",dest='randomize',action='store_true',default=False,\
 help='randomize the order in which input tiles are processed. Not available with --vrt. Default=False.')
 parser.add_option("--vrt",dest='vrt',action='store_true',default=False,\
 help='assemble all tiles in folder into a VRT for re-tiling. Only functions while input path is a dir or textfile list of dirs. Default=False.')
-parser.add_option("--vrt_opts",dest='vrt_opts',default='',\
-help='gdalbuildvrt options specified with double quote. e.g. "-r cubic -a_srs EPSG:3857" to override the projection for the vrt file. Default=None.')
+parser.add_option("--vrt_proj",dest='vrt_proj',default='',\
+help='target EPSG code for re-projecting the VRT. Default=None.')
 parser.add_option("--nc",dest='nocopy',action='store_true',default=False,\
 help='no copying of input. process with remote paths, both read and write. automatic if --vrt is set. Default=False.')
 parser.add_option("--dt",dest='datatype',default='1',\
@@ -58,45 +60,51 @@ if len(args) < no_arguments and not os.path.isfile(args[0]):
     parser.print_help()
     sys.exit()
 
-import i3functions_osgeo4w as i
-from i3functions import spatial as s
-from i3functions import common as c
-import validate_cloud_optimized_geotiff
+if platform == 'win':
+    import i3functions_osgeo4w as i
+    from i3functions import spatial as s
+    from i3functions import common as c
+elif platform == 'linux':
+    import osgeo as i  #gdal utilities in google cloud???
 
-from osgeo import gdal, osr, ogr
+from osgeo import gdal
 import numpy
 import operator
 
-stime = i.printStartTime()
+if platform == 'win':
+    stime = i.printStartTime()
 
 inp = args[0]
 
 if inp.endswith('.txt'):
     pass
-    workdir = args[1]
-    name = args[2]
-    username = args[3]
+    if platform == 'win':
+        workdir = args[1]
+        name = args[2]
+        username = args[3]
 else:
     outdir = args[1]
-    workdir = args[2]
-    name = args[3]
-    username = args[4]
+    if platform == 'win':
+        workdir = args[2]
+        name = args[3]
+        username = args[4]
 
-#Check project name
-if not ',' in name:
-    print '\nProject name and AOI name should be specified as comma separated values.\n'
-    sys.exit()
-else:
-    jobno = name.split(',')[0]
-    name = name.replace(',','+')
+if platform == 'win':
+    #Check project name
+    if not ',' in name:
+        print '\nProject name and AOI name should be specified as comma separated values.\n'
+        sys.exit()
+    else:
+        jobno = name.split(',')[0]
+        name = name.replace(',','+')
 
-#Check username
-fullname = c.getFullName(username)
-if not fullname:
-    print 'Nice try. "%s" user name does not exist. Please use a valid user name.\n' %username
-    sys.exit()
-else:
-    print '\nUser:',fullname
+    #Check username
+    fullname = c.getFullName(username)
+    if not fullname:
+        print 'Nice try. "%s" user name does not exist. Please use a valid user name.\n' %username
+        sys.exit()
+    else:
+        print '\nUser:',fullname
 
 s_id = options.script_id
 ns = options.number_of_scripts
@@ -112,34 +120,32 @@ nocopy = options.nocopy
 empty = options.empty
 opts = options.gdaltranslate_options
 datatype = options.datatype
-vrt_opts = options.vrt_opts
+t_epsg = options.vrt_proj
 
 x = int(x)
 y = int(y)
 
 ################################################################################
+if platform == 'win':
+    if ns >1:
+        for sid in range(2,ns+1):
+            launch_cmd = '%s\\split_image_dev_test.bat ' %i.scripts + ' '.join(['"%s"' %a if not '"' in a else a for a in sys.argv[1:]]) + ' --id %s --ns 1' %sid
+            os.system(r'start /SEPARATE %s' %launch_cmd)
+            print launch_cmd,'\n'
 
-if ns >1:
-    for sid in range(2,ns+1):
-        launch_cmd = '%s\\split_image_dev_test.bat ' %i.scripts + ' '.join(['"%s"' %a if not '"' in a else a for a in sys.argv[1:]]) + ' --id %s --ns 1' %sid
-        os.system(r'start /SEPARATE %s' %launch_cmd)
-        print launch_cmd,'\n'
+    #Write lock file for projmon tracking
+    activef,activef_h = c.writeLockFile(s_id,__file__,workdir,jobno,fullname)
 
-################################################################################
+    #Create job dir
+    if not os.path.isdir(workdir):
+        os.makedirs(workdir)
 
-#Write lock file for projmon tracking
-activef,activef_h = c.writeLockFile(s_id,__file__,workdir,jobno,fullname)
-
-#Create job dir
-if not os.path.isdir(workdir):
-    os.makedirs(workdir)
-
-#Copy pointer to JOB dir
-pointer_txt  = os.path.join(os.path.dirname(c.scripts),'ProjMon','%s.txt'%name)
-pointer_h = open(pointer_txt,'w')
-workdir = c.getUNCPath(workdir)
-pointer_h.write('%s,%s,0,%s'%(workdir,0,fullname))
-pointer_h.close()
+    #Copy pointer to JOB dir
+    pointer_txt  = os.path.join(os.path.dirname(c.scripts),'ProjMon','%s.txt'%name)
+    pointer_h = open(pointer_txt,'w')
+    workdir = c.getUNCPath(workdir)
+    pointer_h.write('%s,%s,0,%s'%(workdir,0,fullname))
+    pointer_h.close()
 
 ################################################################################
 
@@ -253,36 +259,41 @@ def worldFile(inimage):
     inimage_wfile = inimage_noext + world_ext
     return inimage_wfile
 
-def checkMean(infile,xstart,ystart,xsize,ysize,maxval):
+def checkMean(infile,xstart,ystart,xsize,ysize,maxval,num_xtile,num_ytile):
     valid = False
     try:
-        ds = gdal.Open(infile)
-        band = ds.GetRasterBand(1)
-        print 'Srcwin: {} {} {} {}'.format(xstart,ystart,xsize,ysize)
-        subset = band.ReadAsArray(xstart,ystart,xsize,ysize,1000,1000)
-        stat = numpy.mean(subset)
-        print '\nMean: {} > {}'.format(stat,maxval)
-        if stat > maxval:
+        if num_xtile != 1 and num_ytile != 1:
+            ds = gdal.Open(infile)
+            band = ds.GetRasterBand(1)
+            print 'Srcwin: {} {} {} {}'.format(xstart,ystart,xsize,ysize)
+            subset = band.ReadAsArray(xstart,ystart,xsize,ysize,1000,1000)
+            stat = numpy.mean(subset)
+            print '\nMean: {} > {}'.format(stat,maxval)
+            if stat > maxval:
+                valid = True
+        else:
             valid = True
     except Exception,e:
         valid = True
     ds = None
     return valid
 
-def validateCOG(cog_file):
-    try:
-        validate_cloud_optimized_geotiff.validate(cog_file)
-        print '\n{} is a valid cloud optimized GeoTIFF!'.format(os.path.basename(cog_file))
-    except ValidateCloudOptimizedGeoTIFFException as e:
-        print '\n{} is NOT a valid cloud optimized GeoTIFF! : {}'.format(os.path.basename(cog_file),str(e))
-
-def assembleVRT(folder,mos_vrt,gdal_opts):
-    vrt_cmd = '{} {} "{}" "{}"'.format(i.gdalbuildvrt,gdal_opts,mos_vrt,folder)
+def assembleVRT(folder,mos_vrt):
+    vrt_cmd = '{} "{}" "{}"'.format(i.gdalbuildvrt,mos_vrt,folder)
     try:
         print '\n',vrt_cmd
         os.system(vrt_cmd)
     except Exception,e:
-        i.pE(e)
+        print '\n','*'*30,'ERROR','*'*30,'\n',e,'\n','*'*67
+        return None
+
+def warpVRT(vrt_file,warp_file,t_epsg):
+    warp_cmd = '{} -of VRT -r cubic -t_srs EPSG:{} "{}" "{}"'.format(i.gdalwarp,t_epsg,vrt_file,warp_file)
+    try:
+        print '\n',warp_cmd
+        os.system(warp_cmd)
+    except Exception,e:
+        print '\n','*'*30,'ERROR','*'*30,'\n',e,'\n','*'*67
         return None
 
 def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsize,ysize,of,compression,opts,bands,datatype):
@@ -294,12 +305,12 @@ def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsiz
             photometric = ''
         else:
             photometric = 'YCBCR'
-        gdal_param = '-of GTiff -ot Byte -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={} -co PHOTOMETRIC={} -oo NUM_THREADS=4 -co NUM_THREADS=4 --config GDAL_CACHEMAX 500'.format(compression,photometric)
-        gdaladdo_cmd = '{} -r average -oo NUM_THREADS=4 {} 2 4 8 16 32'.format(i.gdaladdo,wrk_tif)
+        gdal_param = '-of GTiff -ot Byte -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={} -co PHOTOMETRIC={} -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500'.format(compression,photometric)
+        gdaladdo_cmd = '{} -r average -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(i.gdaladdo,wrk_tif)
         translate_cmd = '{} {} {} -srcwin {} {} {} {} "{}" "{}"'.format(i.osgeo_translate,opts,gdal_param,xstart,ystart,xsize,ysize,infile,wrk_tif)
     elif of.upper() == 'COG':
         deflate = os.path.join(temp_dir1,os.path.splitext(os.path.basename(outimage))[0]+'_deflate.tif')
-        deflate_cmd = '{} -co TILED=YES -co COMPRESS=DEFLATE -oo NUM_THREADS=4 -co NUM_THREADS=4 --config GDAL_CACHEMAX 500 -srcwin {} {} {} {} "{}" "{}"'.format(i.osgeo_translate,xstart,ystart,xsize,ysize,infile,deflate)
+        deflate_cmd = '{} -co TILED=YES -co COMPRESS=DEFLATE -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500 -srcwin {} {} {} {} "{}" "{}"'.format(i.osgeo_translate,xstart,ystart,xsize,ysize,infile,deflate)
         if datatype == '1':
             if bands > 3:
                 photometric = 'MINISBLACK'
@@ -307,11 +318,11 @@ def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsiz
                 photometric = ''
             else:
                 photometric = 'YCBCR'
-            gdaladdo_cmd = '{} -r average -oo NUM_THREADS=4 {} 2 4 8 16 32'.format(i.gdaladdo,deflate)
-            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={0} -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={1} -co COPY_SRC_OVERVIEWS=YES -oo NUM_THREADS=4 -co NUM_THREADS=4 --config JPEG_QUALITY_OVERVIEW {0} --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'.format(compression,photometric)
+            gdaladdo_cmd = '{} -r average -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(i.gdaladdo,deflate)
+            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={0} -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={1} -co COPY_SRC_OVERVIEWS=YES -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config JPEG_QUALITY_OVERVIEW {0} --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'.format(compression,photometric)
         elif datatype == '2':
-            gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=4 {} 2 4 8 16 32'.format(i.gdaladdo,deflate)
-            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=4 -co NUM_THREADS=4 --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'
+            gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(i.gdaladdo,deflate)
+            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'
         elif datatype == '3':
             if bands > 3:
                 photometric = 'MINISBLACK'
@@ -319,12 +330,13 @@ def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsiz
                 photometric = ''
             else:
                 photometric = 'YCBCR'
-            gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=4 {} 2 4 8 16 32'.format(i.gdaladdo,deflate)
-            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={} -oo NUM_THREADS=4 -co NUM_THREADS=4 --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'.format(photometric)
+            gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(i.gdaladdo,deflate)
+            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={} -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'.format(photometric)
         translate_cmd = '{} {} {} "{}" "{}"'.format(i.osgeo_translate,opts,gdal_param,deflate,wrk_tif)
     else:
-        gdal_param = '-of GTiff -oo NUM_THREADS=4 -co NUM_THREADS=4 --config GDAL_CACHEMAX 500'
+        gdal_param = '-of GTiff -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500'
         translate_cmd = '{} {} {} -srcwin {} {} {} {} "{}" "{}"'.format(i.osgeo_translate,opts,gdal_param,xstart,ystart,xsize,ysize,infile,wrk_tif)
+
     return wrk_tif,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param
 
 def optimizeRaster(wrk_tif,outdir,outimage,temp_dir,num_xtile,num_ytile,of,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param):
@@ -348,13 +360,13 @@ def optimizeRaster(wrk_tif,outdir,outimage,temp_dir,num_xtile,num_ytile,of,gdala
                 os.system(gdaladdo_cmd)
                 print '\n',gdal_param
                 os.system(translate_cmd)
-                validateCOG(wrk_tif)
+##                validateCOG(wrk_tif)
             else:
                 print '\nCreating traditional GeoTIFF...'
                 print '\n',gdal_param
                 os.system(translate_cmd)
         except Exception,e:
-            i.pE(e)
+            print '\n','*'*30,'ERROR','*'*30,'\n',e,'\n','*'*67
             return None
         print '\n********************************************************************************'
         try:
@@ -386,13 +398,13 @@ def optimizeRaster(wrk_tif,outdir,outimage,temp_dir,num_xtile,num_ytile,of,gdala
                     os.system(gdaladdo_cmd)
                     print '\n',gdal_param
                     os.system(translate_cmd)
-                    validateCOG(wrk_tif)
+##                    validateCOG(wrk_tif)
                 else:
                     print '\nCreating traditional GeoTIFF...'
                     print '\n',gdal_param
                     os.system(translate_cmd)
             except Exception,e:
-                i.pE(e)
+                print '\n','*'*30,'ERROR','*'*30,'\n',e,'\n','*'*67
                 return None
             print '\n********************************************************************************'
             try:
@@ -406,6 +418,8 @@ def optimizeRaster(wrk_tif,outdir,outimage,temp_dir,num_xtile,num_ytile,of,gdala
         except Exception,e:
             None
 
+def googleStorage():
+    return
 
 ################################################################################
 
@@ -445,7 +459,7 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
                 outname = getTileName(temp_inimage,num_xtile,num_ytile,k,j)
                 i.pM('\nScript Id: %s\nInput Mosaic: %s\nOutput Tile: %s.tif\nCols/Rows: %ix%i' %(s_id,os.path.basename(temp_inimage),outname,num_xtile,num_ytile))
                 xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
-                if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty):
+                if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile):
                     temp_outimage,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param = getTileGDALParameters(temp_inimage,outname,temp1,temp2,xstart,ystart,xsize,ysize,of,compression,opts,b,datatype)
                     optimizeRaster(temp_outimage,outdir,outname,temp2,num_xtile,num_ytile,of,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param)
                     if k == 1 and j == 1:
@@ -534,6 +548,10 @@ elif os.path.isdir(inp):
                 temp_inimage = image
             if vrt:
                 assembleVRT(pattern,temp_inimage,vrt_opts)
+                if t_epsg != '':
+                    wrk_warp = os.path.join(temp1,'warp.tif')
+                    warpVRT(temp_inimage,wrk_warp,t_epsg)
+                    temp_inimage = wrk_warp
             width,height,num_xtile,num_ytile,last_x,last_y,xpxsz,ypxsz,b = getTileInfo(temp_inimage,temp1,x,y,pb)
             i.pM('\nImage Size: %i,%i\nCols/Rows: %ix%i' %(width,height,num_xtile,num_ytile))
             for k in range(1,num_xtile+1):
@@ -541,7 +559,7 @@ elif os.path.isdir(inp):
                     outname = getTileName(temp_inimage,num_xtile,num_ytile,k,j)
                     i.pM('\nScript Id: %s\nInput Mosaic: %s\nOutput Tile: %s.tif\nCols/Rows: %ix%i' %(s_id,os.path.basename(temp_inimage),outname,num_xtile,num_ytile))
                     xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
-                    if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty):
+                    if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile):
                         temp_outimage,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param = getTileGDALParameters(temp_inimage,outname,temp1,temp2,xstart,ystart,xsize,ysize,of,compression,opts,b,datatype)
                         optimizeRaster(temp_outimage,outdir,outname,temp2,num_xtile,num_ytile,of,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param)
                         if k == 1 and j == 1:
@@ -650,7 +668,7 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
                             outname = getTileName(temp_inimage,num_xtile,num_ytile,k,j)
                             i.pM('\nScript Id: %s\nInput Mosaic: %s\nOutput Tile: %s.tif\nCols/Rows: %ix%i' %(s_id,os.path.basename(temp_inimage),outname,num_xtile,num_ytile))
                             xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
-                            if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty):
+                            if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile):
                                 temp_outimage,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param = getTileGDALParameters(temp_inimage,outname,temp1,temp2,xstart,ystart,xsize,ysize,of,compression,opts,b,datatype)
                                 optimizeRaster(temp_outimage,outdir,outname,temp2,num_xtile,num_ytile,of,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param)
                                 if k == 1 and j == 1:
@@ -690,7 +708,7 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
 
                     c.createDoneFile(wrk_file,id=s_id,ptime_tile=ptime_tile,wrk_file_h = '',tile_size_gb=image_size_gb,jobno=jobno)
 
-i.printProcessingTime(stime)
+printProcessingTime(stime)
 
 #Close lock file
 ################################################################################
