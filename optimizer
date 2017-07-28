@@ -61,6 +61,7 @@ if platform == 'win':
     from i3functions import spatial as s
     from i3functions import common as c
     from osgeo import gdal
+    import validate_cloud_optimized_geotiff
 
     gdaladdo = i.gdaladdo
     gdal_translate = i.gdal_translate
@@ -276,6 +277,15 @@ def checkMean(infile,xstart,ystart,xsize,ysize,maxval,num_xtile,num_ytile,dataty
     ds = None
     return valid
 
+def validateCOG(cog_file):
+    try:
+        validate_cloud_optimized_geotiff.validate(cog_file)
+        msg = '\n{}: is a valid cloud optimized GeoTIFF!'.format(os.path.basename(cog_file))
+        return True, msg
+    except Exception, e:
+        msg = '\n{}: is NOT a valid cloud optimized GeoTIFF!\n{}\n'.format(os.path.basename(cog_file),str(e))
+        return False, msg
+
 def assembleVRT(folder,mos_vrt):
     vrt_cmd = '{} "{}" "{}"'.format(i.gdalbuildvrt,mos_vrt,folder)
     try:
@@ -285,7 +295,7 @@ def assembleVRT(folder,mos_vrt):
         print '\n',e
 
 def warpVRT(vrt_file,warp_file,t_epsg):
-    warp_cmd = '{} -of VRT -r cubic -t_srs EPSG:{} "{}" "{}"'.format(i.gdalwarp,t_epsg,vrt_file,warp_file)
+    warp_cmd = '{} -multi -of VRT -r cubic -t_srs EPSG:{} "{}" "{}"'.format(i.gdalwarp,t_epsg,vrt_file,warp_file)
     try:
         print '\n',warp_cmd
         os.system(warp_cmd)
@@ -316,7 +326,7 @@ def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsiz
         else:
             photometric = 'YCBCR'
         gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
-        gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={} -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'.format(photometric)
+        gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'
     translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,deflate,wrk_tif)
     return wrk_tif,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param
 
@@ -334,12 +344,18 @@ def optimizeRaster(wrk_tif,outdir,outimage,temp_dir,num_xtile,num_ytile,gdaladdo
     except Exception,e:
         print '\n',e
 
-    if platform == 'win':
-        i.copyFile(wrk_tif,outdir,exclude='/xf *.xml *.vrt')
-    elif platform == 'linux':
-        cp_cmd = 'cp {} {}'.format(wrk_tif,outdir)
-        print 'Copying...'
-        os.system(copy_cmd)
+    valid, valid_msg = validateCOG(wrk_tif)
+
+    if valid:
+        if platform == 'win':
+            i.copyFile(wrk_tif,outdir,exclude='/xf *.xml *.vrt')
+        elif platform == 'linux':
+            cp_cmd = 'cp {} {}'.format(wrk_tif,outdir)
+            print 'Copying...'
+            os.system(copy_cmd)
+    else:
+        print valid_msg,'\nHalting further processing!  Check gdal_translate parameters!'
+        sys.exit()
 
     if platform == 'win' and not num_xtile == 1 and not num_ytile == 1:
         os.remove(wrk_tile)
