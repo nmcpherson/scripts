@@ -19,33 +19,33 @@ elif platform == 'linux':
 
 parser = OptionParser(usage=usage)
 parser.add_option("--it",dest='input_type',default='tif',\
-help='Input ANY gdal readable file extension. e.g. tif,dem,bil,adf,vrt,pix,ecw,sid,img... www.gdal.org/formats_list.html; Only functions while input path is a dir or textfile list of dirs. Default=tif.')
-parser.add_option("--ts",dest='xy_tilesize',default='0,0',\
-help='Comma delimited (no spaces) pixel and line dimensions of output tile. Default=0,0 (no tiling)')
-parser.add_option("--pb",dest='pixel_buffer',type='int',default=0,\
-help='Buffer distance in pixels for output tile. Default=0.')
-parser.add_option("--cmp",dest='compression',type='int',default=85,\
-help='JPEG compression factor 8 bit imagery format.. Default=85.')
-parser.add_option("--emp",dest='empty',type='float',default=0.0,\
-help='Maximum mean value for empty output tiles, losers are skipped. Set to -32767 with --dt=2. Value 0.7 recommended for compressed input. Default=0.0')
-parser.add_option("--rz",dest='randomize',action='store_true',default=False,\
-help='Randomize the order in which input tiles are processed. Not available with --vrt. Default=False.')
-parser.add_option("--vrt",dest='vrt',action='store_true',default=False,\
-help='Assemble all tiles in folder into a VRT for re-tiling. Only functions while input path is a dir or textfile list of dirs. Default=False.')
-parser.add_option("--vrt_proj",dest='vrt_proj',default='',\
-help='Target EPSG code for re-projecting the VRT. Default=None.')
-parser.add_option("--nc",dest='nocopy',action='store_true',default=False,\
-help='No copying of input. Process with remote paths, both read and write. Automatic with --vrt. Default=False.')
+help='Default=tif - Input any GDAL readable file extension. e.g. tif,pix,dem,bil,adf,vrt,ecw,sid,img... www.gdal.org/formats_list.html')
 parser.add_option("--dt",dest='datatype',default='1',\
-help='Dataset type. 1 = 8 bit imagery, 2 = high bit depth DEM or DBM, 3 = 16 bit imagery. Default=1.')
+help='Default=1 - Dataset type. 1 = 8 bit imagery (tif-slab), 2 = high bit depth terrain or bathy, 3 = cache tile (tif-cache)')
+parser.add_option("--ts",dest='xy_tilesize',default='0,0',\
+help='Default=None - Comma delimited pixel and line dimensions of output tile.')
+parser.add_option("--pb",dest='pixel_buffer',type='int',default=0,\
+help='Default=0 - Buffer distance in pixels for output tile.')
+parser.add_option("--cmp",dest='compression',type='int',default=85,\
+help='Default=85 - JPEG compression quality for 8 bit imagery.')
+parser.add_option("--emp",dest='empty',type='float',default=0.7,\
+help='Default=0.7 - Maximum mean value for empty output tiles, losers are skipped. Set to -32767 with --dt=2.')
+parser.add_option("--rz",dest='randomize',action='store_true',default=False,\
+help='Default=False - Randomize the order in which input tiles are processed. Not available with --vrt.')
+parser.add_option("--vrt",dest='vrt',action='store_true',default=False,\
+help='Default=False - Assemble all tiles in folder to a VRT for re-tiling. Only functions while input path is a dir or textfile list of dirs.')
+parser.add_option("--vrt_proj",dest='vrt_proj',default='',\
+help='Default=None - VRT EPSG code for re-projecting.')
+parser.add_option("--nc",dest='nocopy',action='store_true',default=False,\
+help='Default=False - No copying of input. Process with remote paths, both read and write. True with --vrt.')
 parser.add_option("--id",dest='script_id',type='int',default=1,\
-help='ID of the script. Windows platforms only. Default=1.')
+help='Default=1 - ID of the script. Windows only.')
 parser.add_option("--ns",dest='n_scripts',default=1,type="int",\
-help="Number of scripts to launch. Specify 2 to launch one additional instance. Windows platforms only. Default=1.")
+help="Default=1 - Number of scripts to launch. Windows only.")
 parser.add_option("--opts",dest='gdal_options',default='',\
-help='gdal_translate options specified with double quote. e.g. "-mask 4" to create external mask from internal band 4. Mask required for MapServer raster sources. Default=None.')
+help='Default=None - gdal_translate options in double quotes. e.g. "-b 1 -b 2 -b 3 -mask 4" to create RGB image with external mask from internal band 4.')
 parser.add_option("--upload",dest='gcs',default='',\
-help='Upload optimized data to Google Cloud Stroage bucket. Windows platform must have Google Cloud SDK installed.  e.g. existing_bucket_guid/new_folder  Default=None')
+help='Default=None - e.g. existing_bucket_guid/new_folder Upload optimized data to Google Cloud Stroage bucket. Windows platform must have Google Cloud SDK installed and authenticated.')
 
 (options,args) = parser.parse_args()
 
@@ -65,6 +65,7 @@ if platform == 'win':
 
     gdaladdo = i.gdaladdo
     gdal_translate = i.gdal_translate
+    gdalbuildvrt = i.gdalbuildvrt
 
     if len(args) < 5 and not os.path.isfile(args[0].endswith('.txt')):
         print '\n'
@@ -100,9 +101,12 @@ if platform == 'win':
 
 elif platform == 'linux':
     from osgeo import gdal
+    import validate_cloud_optimized_geotiff
 
     gdaladdo = '/opt/i-cubed/bin/gdaladdo'
     gdal_translate = '/opt/i-cubed/bin/gdal_translate'
+    gdalbuildvrt = '/opt/i-cubed/bin/gdalbuildvrt'
+    gdalwarp = '/opt/i-cubed/bin/gdalwarp'
 
     if (args) < 2 and not os.path.isfile(inp.endswith('.txt')):
         print '\n'
@@ -160,6 +164,7 @@ def getTileInfo(infile,temp,xpxsz,ypxsz,pxbuff):
     width = ds.RasterXSize
     height = ds.RasterYSize
     bands = ds.RasterCount
+    ds = None
 
     if width < xpxsz or width == xpxsz:
         xpxsz = width
@@ -257,7 +262,7 @@ def getTileCoords(xpxsz,ypxsz,pxbuff,col_id,row_id,num_xtile,num_ytile,last_x,la
     return xstart,ystart,xsize,ysize
 
 def checkMean(infile,xstart,ystart,xsize,ysize,maxval,num_xtile,num_ytile,datatype):
-    if datatype == 2:
+    if datatype == '2':
         maxval = -32767
     valid = False
     try:
@@ -287,7 +292,7 @@ def validateCOG(cog_file):
         return False, msg
 
 def assembleVRT(folder,mos_vrt):
-    vrt_cmd = '{} "{}" "{}"'.format(i.gdalbuildvrt,mos_vrt,folder)
+    vrt_cmd = '{} "{}" {}'.format(gdalbuildvrt,mos_vrt,folder)
     try:
         print '\n',vrt_cmd
         os.system(vrt_cmd)
@@ -295,7 +300,7 @@ def assembleVRT(folder,mos_vrt):
         print '\n',e
 
 def warpVRT(vrt_file,warp_file,t_epsg):
-    warp_cmd = '{} -multi -of VRT -r cubic -t_srs EPSG:{} "{}" "{}"'.format(i.gdalwarp,t_epsg,vrt_file,warp_file)
+    warp_cmd = '{} -multi -of VRT -r cubic -t_srs EPSG:{} "{}" "{}"'.format(gdalwarp,t_epsg,vrt_file,warp_file)
     try:
         print '\n',warp_cmd
         os.system(warp_cmd)
@@ -304,58 +309,60 @@ def warpVRT(vrt_file,warp_file,t_epsg):
 
 def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsize,ysize,compression,opts,bands,datatype):
     wrk_tif = os.path.join(temp_dir2,os.path.splitext(os.path.basename(outimage))[0]+'.tif')
-    deflate = os.path.join(temp_dir1,os.path.splitext(os.path.basename(outimage))[0]+'_deflate.tif')
-    deflate_cmd = '{} {} -co BIGTIFF=YES -co TILED=YES -co COMPRESS=DEFLATE -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500 -srcwin {} {} {} {} "{}" "{}"'.format(gdal_translate,opts,xstart,ystart,xsize,ysize,infile,deflate)
-    if datatype == '1':
-        if bands > 4:
-            photometric = 'MINISBLACK'
-        elif bands == 1:
-            photometric = ''
-        else:
-            photometric = 'YCBCR'
-        gdaladdo_cmd = '{} -r average -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
-        gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={0} -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={1} -co COPY_SRC_OVERVIEWS=YES -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config JPEG_QUALITY_OVERVIEW {0} --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'.format(compression,photometric)
-    elif datatype == '2':
-        gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
-        gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'
-    elif datatype == '3':
-        if bands > 4:
-            photometric = 'MINISBLACK'
-        elif bands == 1:
-            photometric = ''
-        else:
-            photometric = 'YCBCR'
-        gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
-        gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500 -stats'
-    translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,deflate,wrk_tif)
+    if datatype != '3':
+        deflate = os.path.join(temp_dir1,os.path.splitext(os.path.basename(outimage))[0]+'_deflate.tif')
+        deflate_cmd = '{} {} -co BIGTIFF=YES -co TILED=YES -co COMPRESS=DEFLATE -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500 -srcwin {} {} {} {} "{}" "{}"'.format(gdal_translate,opts,xstart,ystart,xsize,ysize,infile,deflate)
+        if datatype == '1':
+            if bands > 3:
+                photometric = 'MINISBLACK'
+            elif bands == 1:
+                photometric = ''
+            else:
+                photometric = 'YCBCR'
+            gdaladdo_cmd = '{} -r average -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
+            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={0} -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={1} -co COPY_SRC_OVERVIEWS=YES -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config JPEG_QUALITY_OVERVIEW {0} --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'.format(compression,photometric)
+        elif datatype == '2':
+            gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
+            gdal_param = '-of GTiff -stats -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'
+        translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,deflate,wrk_tif)
+    else:
+        deflate_cmd = ''
+        gdaladdo_cmd = ''
+        gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={} -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 -co PHOTOMETRIC=YCBCR -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500'.format(compression)
+        translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,infile,wrk_tif)
     return wrk_tif,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param
 
 def optimizeRaster(wrk_tif,outdir,outimage,temp_dir,num_xtile,num_ytile,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param,datatype):
     if platform == 'win' and not num_xtile == 1 and not num_ytile == 1:
         wrk_tile = i.createWrkfile(os.path.join(outdir,outimage)+'.tif')
     try:
-        print '\nCreating cloud optimized GeoTIFF...'
-        print '\n',deflate_cmd
-        os.system(deflate_cmd)
-        print '\n',gdaladdo_cmd
-        os.system(gdaladdo_cmd)
-        print '\n',gdal_param
-        os.system(translate_cmd)
+        if datatype != '3':
+            print '\nCreating cloud optimized GeoTIFF...'
+            print '\n',deflate_cmd
+            os.system(deflate_cmd)
+            print '\n',gdaladdo_cmd
+            os.system(gdaladdo_cmd)
+            print '\n',gdal_param
+            os.system(translate_cmd)
+        else:
+            print '\nCreating cloud optimized GeoTIFF...'
+            print '\n',gdal_param
+            os.system(translate_cmd)
     except Exception,e:
         print '\n',e
 
-    valid, valid_msg = validateCOG(wrk_tif)
+    if datatype != '3':
+        valid, valid_msg = validateCOG(wrk_tif)
+        if not valid:
+            print valid_msg,'\nHalting further processing!  Check gdal_translate parameters!'
+            sys.exit()
 
-    if valid:
-        if platform == 'win':
-            i.copyFile(wrk_tif,outdir,exclude='/xf *.xml *.vrt')
-        elif platform == 'linux':
-            cp_cmd = 'cp {} {}'.format(wrk_tif,outdir)
-            print 'Copying...'
-            os.system(copy_cmd)
-    else:
-        print valid_msg,'\nHalting further processing!  Check gdal_translate parameters!'
-        sys.exit()
+    if platform == 'win':
+        i.copyFile(wrk_tif,outdir,exclude='/xf *.xml *.vrt')
+    elif platform == 'linux':
+        copy_cmd = 'cp {} {}'.format(wrk_tif.replace('.tif','.*'),outdir)
+        print 'Copying...'
+        os.system(copy_cmd)
 
     if platform == 'win' and not num_xtile == 1 and not num_ytile == 1:
         os.remove(wrk_tile)
@@ -374,8 +381,8 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
     if platform == 'win':
         comp_name,no_processors,temp1,temp2 = i.createTempdir('optimizer',s_id)
     elif platform == 'linux':
-        temp1 = '/optimizer_temp1'
-        temp2 = '/optimizer_temp2'
+        temp1 = '/tmp/optimizer_temp1'
+        temp2 = '/tmp/optimizer_temp2'
         if not os.path.exists(temp1):
             os.makedirs(temp1)
         if not os.path.exists(temp2):
@@ -412,7 +419,7 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
                 if platform == 'win':
                     i.copyFolder(infolder,temp1)
                 elif platform == 'linux':
-                    cp_cmd = 'cp {} {}'.format(os.path.join(infolder,'*'),temp1)
+                    copy_cmd = 'cp {} {}'.format(os.path.join(infolder,'*'),temp1)
                     print 'Copying...'
                     os.system(copy_cmd)
             elif it == 'vrt':
@@ -422,7 +429,7 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
                 if platform == 'win':
                     i.copyFile(inp,temp1,exclude='/xf *.aux')
                 elif platform == 'linux':
-                    cp_cmd = 'cp {} {}'.format(inp,temp1)
+                    copy_cmd = 'cp {} {}'.format(inp,temp1)
                     print 'Copying...'
                     os.system(copy_cmd)
         else:
@@ -476,7 +483,7 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
         if platform == 'win':
             i.copyFile(logfile,outdir,exclude='/xf *.tif* *.vrt')
         elif platform == 'linux':
-            cp_cmd = 'cp {} {}'.format(logfile,outdir)
+            copy_cmd = 'cp {} {}'.format(logfile,outdir)
             print 'Copying...'
             os.system(copy_cmd)
 
@@ -486,8 +493,8 @@ elif os.path.isdir(inp):
     if platform == 'win':
         comp_name,no_processors,temp1,temp2 = i.createTempdir('optimizer',s_id)
     elif platform == 'linux':
-        temp1 = '/optimizer_temp1'
-        temp2 = '/optimizer_temp2'
+        temp1 = '/tmp/optimizer_temp1'
+        temp2 = '/tmp/optimizer_temp2'
         if not os.path.exists(temp1):
             os.makedirs(temp1)
         if not os.path.exists(temp2):
@@ -544,13 +551,13 @@ elif os.path.isdir(inp):
                 if platform == 'win':
                     i.copyFile(image,temp1,exclude='/xf *.aux')
                 elif platform == 'linux':
-                    cp_cmd = 'cp {} {}'.format(image,temp1)
+                    copy_cmd = 'cp {} {}'.format(image,temp1)
                     print 'Copying...'
                     os.system(copy_cmd)
             else:
                 temp_inimage = image
             if vrt:
-                assembleVRT(pattern,temp_inimage)
+                assembleVRT(pattern[:-4],temp_inimage)
                 if t_epsg != '':
                     wrk_warp = os.path.join(temp2,os.path.basename(temp_inimage))
                     warpVRT(temp_inimage,wrk_warp,t_epsg)
@@ -604,7 +611,7 @@ elif os.path.isdir(inp):
             if platform == 'win':
                 i.copyFile(logfile,outdir,exclude='/xf *.tif* *.vrt')
             elif platform == 'linux':
-                cp_cmd = 'cp {} {}'.format(logfile,outdir)
+                copy_cmd = 'cp {} {}'.format(logfile,outdir)
                 print 'Copying...'
                 os.system(copy_cmd)
 
@@ -614,8 +621,8 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
     if platform == 'win':
         comp_name,no_processors,temp1,temp2 = i.createTempdir('optimizer',s_id)
     elif platform == 'linux':
-        temp1 = '/optimizer_temp1'
-        temp2 = '/optimizer_temp2'
+        temp1 = '/tmp/optimizer_temp1'
+        temp2 = '/tmp/optimizer_temp2'
         if not os.path.exists(temp1):
             os.makedirs(temp1)
         if not os.path.exists(temp2):
@@ -685,13 +692,13 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
                         if platform == 'win':
                             i.copyFile(image,temp1,exclude='/xf *.aux')
                         elif platform == 'linux':
-                            cp_cmd = 'cp {} {}'.format(image,temp1)
+                            copy_cmd = 'cp {} {}'.format(image,temp1)
                             print 'Copying...'
                             os.system(copy_cmd)
                     else:
                         temp_inimage = image
                     if vrt:
-                        assembleVRT(pattern,temp_inimage)
+                        assembleVRT(pattern[:-4],temp_inimage)
                         if t_epsg != '':
                             wrk_warp = os.path.join(temp2,os.path.basename(temp_inimage))
                             warpVRT(temp_inimage,wrk_warp,t_epsg)
@@ -745,7 +752,7 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
                     if platform == 'win':
                         i.copyFile(logfile,outdir,exclude='/xf *.tif* *.vrt')
                     elif platform == 'linux':
-                        cp_cmd = 'cp {} {}'.format(logfile,outdir)
+                        copy_cmd = 'cp {} {}'.format(logfile,outdir)
                         print 'Copying...'
                         os.system(copy_cmd)
 
