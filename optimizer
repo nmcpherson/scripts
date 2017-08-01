@@ -63,6 +63,8 @@ if platform == 'win':
     from osgeo import gdal
     import validate_cloud_optimized_geotiff
 
+    gdalbuildvrt = i.gdalbuildvrt
+    gdalwarp = i.gdalwarp
     gdaladdo = i.gdaladdo
     gdal_translate = i.gdal_translate
 
@@ -100,7 +102,10 @@ if platform == 'win':
 
 elif platform == 'linux':
     from osgeo import gdal
+    import validate_cloud_optimized_geotiff
 
+    gdalbuildvrt = '/opt/i-cubed/bin/gdalbuildvrt'
+    gdalwarp = '/opt/i-cubed/bin/gdalwarp'
     gdaladdo = '/opt/i-cubed/bin/gdaladdo'
     gdal_translate = '/opt/i-cubed/bin/gdal_translate'
 
