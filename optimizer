@@ -1,3 +1,15 @@
+#-------------------------------------------------------------------------------
+# Name:        optimizer.py
+# Purpose:
+#
+# Author:      nmcpherson
+#
+# Created:     04/08/2017
+# Copyright:   (c) nmcpherson 2017
+# Licence:     <your licence>
+#-------------------------------------------------------------------------------
+#!/usr/bin/env python
+
 import sys,os,glob,time,shutil,math,random,numpy,operator
 from optparse import OptionParser
 
@@ -164,7 +176,6 @@ def getTileInfo(infile,temp,xpxsz,ypxsz,pxbuff):
     width = ds.RasterXSize
     height = ds.RasterYSize
     bands = ds.RasterCount
-    ds = None
 
     if width < xpxsz or width == xpxsz:
         xpxsz = width
