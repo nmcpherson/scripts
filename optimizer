@@ -294,7 +294,6 @@ def checkMean(infile,xstart,ystart,xsize,ysize,maxval,num_xtile,num_ytile,dataty
         else:
             valid = True
     except Exception,e:
-        valid = True
         print '\n',e
     return valid
 
