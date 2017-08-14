@@ -290,12 +290,12 @@ def checkMean(infile,xstart,ystart,xsize,ysize,maxval,num_xtile,num_ytile,dataty
             print 'Mean: {} > {}'.format(stat,maxval)
             if stat > maxval:
                 valid = True
+            ds = None
         else:
             valid = True
     except Exception,e:
         valid = True
         print '\n',e
-    ds = None
     return valid
 
 def validate(filename,datatype):
