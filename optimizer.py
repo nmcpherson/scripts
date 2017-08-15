@@ -450,33 +450,10 @@ def warpVRT(vrt_file,warp_file,t_epsg,datatype):
     except Exception,e:
         print '\n',e
 
-def optimizeRaster(infile,outdir,outimage,temp_dir1,temp_dir2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,bands,datatype):
-    bn = os.path.splitext(os.path.basename(outimage))[0]
-    wrk_tif = os.path.join(temp_dir2, bn +'.tif')
-    if datatype != '3':
-        deflate = os.path.join(temp_dir1, bn +'_deflate.tif')
-        deflate_cmd = '{} {} -co BIGTIFF=YES -co TILED=YES -co COMPRESS=DEFLATE -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500 -srcwin {} {} {} {} "{}" "{}"'.format(gdal_translate,opts,xstart,ystart,xsize,ysize,infile,deflate)
-        if datatype == '1':
-            if bands > 3:
-                photometric = 'MINISBLACK'
-            elif bands == 1:
-                photometric = ''
-            else:
-                photometric = 'YCBCR'
-            gdaladdo_cmd = '{} -r average -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
-            gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={0} -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={1} -co COPY_SRC_OVERVIEWS=YES -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config JPEG_QUALITY_OVERVIEW {0} --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'.format(compression,photometric)
-        elif datatype == '2':
-            gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
-            gdal_param = '-of GTiff -stats -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'
-        translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,deflate,wrk_tif)
-    else:
-        deflate_cmd = ''
-        gdaladdo_cmd = ''
-        gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={} -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 -co PHOTOMETRIC=YCBCR -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500'.format(compression)
-        translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,infile,wrk_tif)
-    if not os.path.isdir(outdir):
-        os.mkdir(outdir)
-    proc_tile = False
+def optimizeRaster(infile,outdir,outimage,temp_dir1,temp_dir2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,bands,datatype,maxval):
+	proc_tile = False
+	if not os.path.isdir(outdir):
+        os.mkdir(outdir)		
     if platform == 'win':
         if not num_xtile == 1 and not num_ytile == 1:
             wrk_tile = i.createWrkfile(os.path.join(outdir, outimage) + '.tif')
@@ -486,38 +463,68 @@ def optimizeRaster(infile,outdir,outimage,temp_dir1,temp_dir2,num_xtile,num_ytil
             if not os.path.isfile(os.path.join(outdir, outimage) + '.tif'):
                 if not os.path.isfile(os.path.join(outdir, outimage) + '.wrk'):
                     proc_tile = True
+				else:
+					print '\nOutput in progress. Skipping.'
+			else:
+				print '\nOutput already exists. Skipping.'
     elif platform == 'linux':
         if not os.path.isfile(os.path.join(outdir, outimage) + '.tif'):
             proc_tile = True
         else:
-            print '\nOutput already exists. Skipping.'
-    if proc_tile:
+            print '\nOutput already exists. Skipping.'			
+	if checkMean(infile,xstart,ystart,xsize,ysize,maxval,num_xtile,num_ytile,datatype):
+		proc_tile = True
+	else:
+		print 'Output tile contains only NoData. Skipping.'
+	if proc_tile:
+		bn = os.path.splitext(os.path.basename(outimage))[0]
+		wrk_tif = os.path.join(temp_dir2, bn +'.tif')
+		if datatype != '3':
+			deflate = os.path.join(temp_dir1, bn +'_deflate.tif')
+			deflate_cmd = '{} {} -co BIGTIFF=YES -co TILED=YES -co COMPRESS=DEFLATE -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500 -srcwin {} {} {} {} "{}" "{}"'.format(gdal_translate,opts,xstart,ystart,xsize,ysize,infile,deflate)
+			if datatype == '1':
+				if bands > 3:
+					photometric = 'MINISBLACK'
+				elif bands == 1:
+					photometric = ''
+				else:
+					photometric = 'YCBCR'
+				gdaladdo_cmd = '{} -r average -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
+				gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={0} -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -co PHOTOMETRIC={1} -co COPY_SRC_OVERVIEWS=YES -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config JPEG_QUALITY_OVERVIEW {0} --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'.format(compression,photometric)
+			elif datatype == '2':
+				gdaladdo_cmd = '{} -r nearest -oo NUM_THREADS=ALL_CPUS {} 2 4 8 16 32'.format(gdaladdo,deflate)
+				gdal_param = '-of GTiff -stats -co TILED=YES -co COMPRESS=LZW -co PREDICTOR=2 -co COPY_SRC_OVERVIEWS=YES -co BLOCKXSIZE=512 -co BLOCKYSIZE=512 -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_TIFF_OVR_BLOCKSIZE 512 --config GDAL_CACHEMAX 500'
+			translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,deflate,wrk_tif)
+		else:
+			deflate_cmd = ''
+			gdaladdo_cmd = ''
+			gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={} -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 -co PHOTOMETRIC=YCBCR -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500'.format(compression)
+			translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,infile,wrk_tif)
         try:
-            if datatype != '3':
-                print '\nCreating cloud optimized GeoTIFF...'
-                print '\n',deflate_cmd
-                os.system(deflate_cmd)
-                print '\n',gdaladdo_cmd
-                os.system(gdaladdo_cmd)
-                print '\n',gdal_param
-                os.system(translate_cmd)
-            else:
-                print '\nCreating cloud optimized GeoTIFF...'
-                print '\n',gdal_param
-                os.system(translate_cmd)
-            valid, valid_msg = validate(wrk_tif,datatype)
-            if not valid:
-                print valid_msg,'\nHalting further processing! Check gdal_translate parameters!'
-                sys.exit()
-            else:
-                print valid_msg
-            if platform == 'win':
-                i.copyFile(wrk_tif,outdir,exclude='/xf *.xml *.vrt')
-                os.remove(wrk_tile)
-            elif platform == 'linux':
-                cp_cmd = 'cp {} {}'.format(wrk_tif.replace('.tif','.*'),outdir)
-                print '\nCopying to destination...{}'.format(os.path.join(outdir,wrk_tif))
-                os.system(cp_cmd)
+			print '\nCreating cloud optimized GeoTIFF...'
+			if datatype != '3':				
+				print '\n',deflate_cmd
+				os.system(deflate_cmd)
+				print '\n',gdaladdo_cmd
+				os.system(gdaladdo_cmd)
+				print '\n',gdal_param
+				os.system(translate_cmd)
+			else:
+				print '\n',gdal_param
+				os.system(translate_cmd)
+			valid, valid_msg = validate(wrk_tif,datatype)
+			if not valid:
+				print valid_msg,'\nHalting further processing! Check gdal_translate parameters!'
+				sys.exit()
+			else:
+				print valid_msg
+			if platform == 'win':
+				i.copyFile(wrk_tif,outdir,exclude='/xf *.xml *.vrt')
+				os.remove(wrk_tile)
+			elif platform == 'linux':
+				cp_cmd = 'cp {} {}'.format(wrk_tif.replace('.tif','.*'),outdir)
+				print '\nCopying to destination...{}'.format(os.path.join(outdir,wrk_tif))
+				os.system(cp_cmd)                
         except Exception,e:
             print '\n',e
 
@@ -584,23 +591,11 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
         for k in range(1,num_xtile+1):
             for j in range(1,num_ytile+1):
                 outname = getTileName(temp_inimage,num_xtile,num_ytile,k,j)
-                print '\nInput Image: {}\nImage Size: {}, {}\nOutput Image: {}.tif\nCols/Rows: {}x{}'\
-                .format(os.path.basename(temp_inimage),width,height,outname,num_xtile,num_ytile)
+                print '\nInput Image: {}\nImage Size: {}, {}\nOutput Image: {}.tif\nCols/Rows: {}x{}'.format(os.path.basename(temp_inimage),width,height,outname,num_xtile,num_ytile)
                 xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
-                if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile,datatype):
-                    optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
-                    if k == 1 and j == 1:
-                        if platform == 'win':
-                            try:
-                                image_size_gb = s.getUncompressedSize(temp_outimage)
-                            except Exception,e:
-                                print '\n',e
-                                image_size_gb = 1
-                    if gcs != '':
-                        csv_table.append('/vsicurl/http://storage.googleapis.com/{}/{},{}'.format(gcs,os.path.basename(temp_outimage),os.path.basename(temp_outimage).replace('.tif','')))
-                else:
-                    image_size_gb = 1
-                    print 'Output tile contains only NoData and will be skipped.'
+                optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype,empty)
+                if gcs != '':
+                    csv_table.append('/vsicurl/http://storage.googleapis.com/{}/{},{}'.format(gcs,os.path.basename(temp_outimage),os.path.basename(temp_outimage).replace('.tif','')))
                 j+=1
                 continue
             k+=1
@@ -614,10 +609,10 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
         if platform == 'win':
             pointer_h = open(pointer_txt,'w')
             pointer_workdir = c.getUNCPath(workdir)
-            pointer_h.write('%s,%s,%s,%s'%(pointer_workdir,1,image_size_gb,fullname))
+            pointer_h.write('%s,%s,%s,%s'%(pointer_workdir,1,1,fullname))
             pointer_h.close()
             ptime_tile = time.time() - stime_tile
-            c.createDoneFile(wrk_file,id=s_id,ptime_tile=ptime_tile,wrk_file_h = '',tile_size_gb=image_size_gb,jobno=jobno)
+            c.createDoneFile(wrk_file,id=s_id,ptime_tile=ptime_tile,wrk_file_h = '',tile_size_gb=1,jobno=jobno)
 
     if gcs != '':
         print 'Writing table...'
@@ -649,7 +644,7 @@ elif os.path.isdir(inp):
         if not os.path.exists(temp2):
             os.makedirs(temp2)
 
-    pattern = os.path.join(inp,'*.{}'.format(it))
+    pattern = os.path.join(infolder,'*.{}'.format(it))
     inimages = []
     if vrt:
         names = glob.glob(pattern)
@@ -708,20 +703,9 @@ elif os.path.isdir(inp):
                     outname = getTileName(temp_inimage,num_xtile,num_ytile,k,j)
                     print '\nInput Image: {}\nImage Size: {}, {}\nOutput Image: {}.tif\nCols/Rows: {}x{}'.format(os.path.basename(temp_inimage),width,height,outname,num_xtile,num_ytile)
                     xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
-                    if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile,datatype):
-						optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
-                        if k == 1 and j == 1:
-                            if platform == 'win':
-                                try:
-                                    image_size_gb = s.getUncompressedSize(temp_outimage)
-                                except Exception,e:
-                                    print '\n',e
-                                    image_size_gb = 1
-                        if gcs != '':
-                            csv_table.append('/vsicurl/http://storage.googleapis.com/{}/{},{}'.format(gcs,os.path.basename(temp_outimage),os.path.basename(temp_outimage).replace('.tif','')))
-                    else:
-                        image_size_gb = 1
-                        print 'Output tile contains only NoData and will be skipped.'
+					optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype,empty)
+					if gcs != '':
+						csv_table.append('/vsicurl/http://storage.googleapis.com/{}/{},{}'.format(gcs,os.path.basename(temp_outimage),os.path.basename(temp_outimage).replace('.tif','')))
                     j+=1
                     continue
                 k+=1
@@ -735,10 +719,10 @@ elif os.path.isdir(inp):
             if platform == 'win':
                 pointer_h = open(pointer_txt,'w')
                 pointer_workdir = c.getUNCPath(workdir)
-                pointer_h.write('%s,%s,%s,%s'%(pointer_workdir,1,image_size_gb,fullname))
+                pointer_h.write('%s,%s,%s,%s'%(pointer_workdir,1,1,fullname))
                 pointer_h.close()
                 ptime_tile = time.time() - stime_tile
-                c.createDoneFile(wrk_file,id=s_id,ptime_tile=ptime_tile,wrk_file_h = '',tile_size_gb=image_size_gb,jobno=jobno)
+                c.createDoneFile(wrk_file,id=s_id,ptime_tile=ptime_tile,wrk_file_h = '',tile_size_gb=1,jobno=jobno)
 
         if gcs != '':
             print 'Writing table...'
@@ -842,20 +826,9 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
                             outname = getTileName(temp_inimage,num_xtile,num_ytile,k,j)
                             print '\nInput Image: {}\nImage Size: {}, {}\nOutput Image: {}.tif\nCols/Rows: {}x{}'.format(os.path.basename(temp_inimage),width,height,outname,num_xtile,num_ytile)
                             xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
-                            if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile,datatype):
-                                optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
-                                if k == 1 and j == 1:
-                                    if platform == 'win':
-                                        try:
-                                            image_size_gb = s.getUncompressedSize(temp_outimage)
-                                        except Exception,e:
-                                            print '\n',e
-                                            image_size_gb = 1
-                                if gcs != '':
-                                    csv_table.append('/vsicurl/http://storage.googleapis.com/{}/{},{}'.format(gcs,os.path.basename(temp_outimage),os.path.basename(temp_outimage).replace('.tif','')))
-                            else:
-                                image_size_gb = 1
-                                print 'Output tile contains only NoData and will be skipped.'
+                            optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype,empty)
+							if gcs != '':
+								csv_table.append('/vsicurl/http://storage.googleapis.com/{}/{},{}'.format(gcs,os.path.basename(temp_outimage),os.path.basename(temp_outimage).replace('.tif','')))
                             j+=1
                             continue
                         k+=1
@@ -869,10 +842,10 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
                     if platform == 'win':
                         pointer_h = open(pointer_txt,'w')
                         pointer_workdir = c.getUNCPath(workdir)
-                        pointer_h.write('%s,%s,%s,%s'%(pointer_workdir,1,image_size_gb,fullname))
+                        pointer_h.write('%s,%s,%s,%s'%(pointer_workdir,1,1,fullname))
                         pointer_h.close()
                         ptime_tile = time.time() - stime_tile
-                        c.createDoneFile(wrk_file,id=s_id,ptime_tile=ptime_tile,wrk_file_h = '',tile_size_gb=image_size_gb,jobno=jobno)
+                        c.createDoneFile(wrk_file,id=s_id,ptime_tile=ptime_tile,wrk_file_h = '',tile_size_gb=1,jobno=jobno)
 
                 if gcs != '':
                     print 'Writing table...'
