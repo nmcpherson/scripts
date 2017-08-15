@@ -97,7 +97,12 @@ if platform == 'win':
     gdalbuildvrt = i.gdalbuildvrt
     gdalwarp = i.gdalwarp
 
-    if len(args) < 5 and not inp.endswith('.txt'):
+    if len(args) != 5 and not inp.endswith('.txt'):
+        print '\n'
+        parser.print_help()
+        sys.exit()
+		
+	elif len(args) != 4 and inp.endswith('.txt'):
         print '\n'
         parser.print_help()
         sys.exit()
@@ -171,7 +176,6 @@ def removeFile(infile):
             os.remove(item)
         except Exception,e:
             'Could not remove {}'.format(item)
-        except Exception,e:
             print '\n',e
 
 def getTileInfo(infile,temp,xpxsz,ypxsz,pxbuff):
@@ -446,7 +450,7 @@ def warpVRT(vrt_file,warp_file,t_epsg,datatype):
     except Exception,e:
         print '\n',e
 
-def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsize,ysize,compression,opts,bands,datatype):
+def optimizeRaster(infile,outdir,outimage,temp_dir1,temp_dir2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,bands,datatype):
     bn = os.path.splitext(os.path.basename(outimage))[0]
     wrk_tif = os.path.join(temp_dir2, bn +'.tif')
     if datatype != '3':
@@ -470,9 +474,6 @@ def getTileGDALParameters(infile,outimage,temp_dir1,temp_dir2,xstart,ystart,xsiz
         gdaladdo_cmd = ''
         gdal_param = '-of GTiff -co TILED=YES -co COMPRESS=JPEG -co JPEG_QUALITY={} -co BLOCKXSIZE=256 -co BLOCKYSIZE=256 -co PHOTOMETRIC=YCBCR -oo NUM_THREADS=ALL_CPUS -co NUM_THREADS=ALL_CPUS --config GDAL_CACHEMAX 500'.format(compression)
         translate_cmd = '{} {} "{}" "{}"'.format(gdal_translate,gdal_param,infile,wrk_tif)
-    return wrk_tif,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param
-
-def optimizeRaster(wrk_tif,outdir,outimage,temp_dir,num_xtile,num_ytile,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param,datatype):
     if not os.path.isdir(outdir):
         os.mkdir(outdir)
     proc_tile = False
@@ -587,8 +588,7 @@ if os.path.isfile(inp) and not inp.endswith('.txt'):
                 .format(os.path.basename(temp_inimage),width,height,outname,num_xtile,num_ytile)
                 xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
                 if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile,datatype):
-                    temp_outimage,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param = getTileGDALParameters(temp_inimage,outname,temp1,temp2,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
-                    optimizeRaster(temp_outimage,outdir,outname,temp2,num_xtile,num_ytile,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param,datatype)
+                    optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
                     if k == 1 and j == 1:
                         if platform == 'win':
                             try:
@@ -709,8 +709,7 @@ elif os.path.isdir(inp):
                     print '\nInput Image: {}\nImage Size: {}, {}\nOutput Image: {}.tif\nCols/Rows: {}x{}'.format(os.path.basename(temp_inimage),width,height,outname,num_xtile,num_ytile)
                     xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
                     if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile,datatype):
-                        temp_outimage,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param = getTileGDALParameters(temp_inimage,outname,temp1,temp2,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
-                        optimizeRaster(temp_outimage,outdir,outname,temp2,num_xtile,num_ytile,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param,datatype)
+						optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
                         if k == 1 and j == 1:
                             if platform == 'win':
                                 try:
@@ -844,8 +843,7 @@ elif os.path.isfile(inp) and inp.endswith('.txt'):
                             print '\nInput Image: {}\nImage Size: {}, {}\nOutput Image: {}.tif\nCols/Rows: {}x{}'.format(os.path.basename(temp_inimage),width,height,outname,num_xtile,num_ytile)
                             xstart,ystart,xsize,ysize = getTileCoords(xpxsz,ypxsz,pb,k,j,num_xtile,num_ytile,last_x,last_y)
                             if checkMean(temp_inimage,xstart,ystart,xsize,ysize,empty,num_xtile,num_ytile,datatype):
-                                temp_outimage,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param = getTileGDALParameters(temp_inimage,outname,temp1,temp2,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
-                                optimizeRaster(temp_outimage,outdir,outname,temp2,num_xtile,num_ytile,gdaladdo_cmd,translate_cmd,deflate_cmd,gdal_param,datatype)
+                                optimizeRaster(temp_inimage,outdir,outname,temp1,temp2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,b,datatype)
                                 if k == 1 and j == 1:
                                     if platform == 'win':
                                         try:
