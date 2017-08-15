@@ -49,7 +49,7 @@ parser.add_option("--vrt",dest='vrt',action='store_true',default=False,\
 help='Default=False - Assemble all tiles in folder to a VRT for re-tiling. \
 Only functions while input path is a dir or textfile list of dirs.')
 parser.add_option("--vrt_proj",dest='vrt_proj',default='',\
-help='Default=None - VRT SRS code for re-projecting. Use wm for Web Mecator. e.g. --vrt_proj EPSG:4326')
+help='Default=None - VRT SRS code for re-projecting. Use wm for Web Mecator, not EPSG:3857')
 parser.add_option("--nc",dest='nocopy',action='store_true',default=False,\
 help='Default=False - No copying of input to local dir. Set to True with --vrt.')
 parser.add_option("--id",dest='script_id',type='int',default=1,\
@@ -279,6 +279,32 @@ def getTileCoords(xpxsz,ypxsz,pxbuff,col_id,row_id,num_xtile,num_ytile,last_x,la
         ysize = ypxsz + pxbuff + pxbuff
     return xstart,ystart,xsize,ysize
 
+def assembleVRT(folder,mos_vrt):
+    vrt_cmd = '{} {} {}'.format(gdalbuildvrt,mos_vrt,folder)
+    try:
+        print '\n',vrt_cmd
+        os.system(vrt_cmd)
+    except Exception,e:
+        print '\n',e
+
+def warpVRT(vrt_file,warp_file,t_srs,datatype):
+    if datatype == '2':
+        resample = 'near'
+    else:
+        resample = 'cubic'
+    if t_srs == 'wm':
+        wkt = 'PROJCS["WGS_1984_Web_Mercator",GEOGCS["GCS_WGS_1984_Major_Auxiliary_Sphere",DATUM["WGS_1984_Major_Auxiliary_Sphere",SPHEROID["WGS_1984_Major_Auxiliary_Sphere",6378137.0,0.0]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",0.0],PARAMETER["latitude_of_origin",0.0],UNIT["Meter",1.0],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","900913"]]'
+        srs_prj = os.path.join(temp2,'srs.prj')
+        with open(srs_prj, 'a+') as wf:
+            wf.write('{}'.format(wkt))
+        t_srs = srs_prj
+    warp_cmd = '{} -q -dstnodata None -nosrcalpha -of VRT -r {} -t_srs {} {} {}'.format(gdalwarp,resample,t_srs,vrt_file,warp_file)
+    try:
+        print '\n',warp_cmd
+        os.system(warp_cmd)
+    except Exception,e:
+        print '\n',e
+
 def checkMean(infile,xstart,ystart,xsize,ysize,maxval,num_xtile,num_ytile,datatype):
     if datatype == '2':
         maxval = -32767
@@ -423,32 +449,6 @@ def validate(filename,datatype):
     except ValidateCloudOptimizedGeoTIFFException as e:
         msg = '\n{}: is NOT a valid cloud optimized GeoTIFF!\n{}\n'.format(os.path.basename(filename),str(e))
         return False, msg
-
-def assembleVRT(folder,mos_vrt):
-    vrt_cmd = '{} {} {}'.format(gdalbuildvrt,mos_vrt,folder)
-    try:
-        print '\n',vrt_cmd
-        os.system(vrt_cmd)
-    except Exception,e:
-        print '\n',e
-
-def warpVRT(vrt_file,warp_file,t_epsg,datatype):
-    if datatype == '2':
-        resample = 'near'
-    else:
-        resample = 'cubic'
-    if t_epsg == 'wm':
-        wkt = 'PROJCS["WGS_1984_Web_Mercator",GEOGCS["GCS_WGS_1984_Major_Auxiliary_Sphere",DATUM["WGS_1984_Major_Auxiliary_Sphere",SPHEROID["WGS_1984_Major_Auxiliary_Sphere",6378137.0,0.0]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",0.0],PARAMETER["latitude_of_origin",0.0],UNIT["Meter",1.0],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","900913"]]'
-        wm_wkt = os.path.join(temp2,'wm.wkt')
-        with open(wm_wkt, 'a+') as wf:
-            wf.write('{}'.format(wkt))
-        t_epsg = wm_wkt
-    warp_cmd = '{} -q -dstnodata None -nosrcalpha -of VRT -r {} -t_srs {} {} {}'.format(gdalwarp,resample,t_epsg,vrt_file,warp_file)
-    try:
-        print '\n',warp_cmd
-        os.system(warp_cmd)
-    except Exception,e:
-        print '\n',e
 
 def optimizeRaster(infile,outdir,outimage,temp_dir1,temp_dir2,num_xtile,num_ytile,xstart,ystart,xsize,ysize,compression,opts,bands,datatype,maxval):
     proc_tile = False
